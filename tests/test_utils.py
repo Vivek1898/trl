@@ -2299,6 +2299,21 @@ class TestComputeFlopsPerToken(TrlTestCase):
         cfg.head_dim = cfg.hidden_size // cfg.num_attention_heads
         assert compute_flops_per_token(cfg, 16384) == derived
 
+    def test_moe_config_with_num_experts_only(self):
+        # GH#8229: some MoE configs (e.g. Qwen3.5-MoE, Beam) expose `num_experts` instead of
+        # `num_local_experts` and omit `decoder_sparse_step`, in which case every layer is an MoE
+        # layer (a step of 1). compute_flops_per_token must handle both.
+        cfg = AutoConfig.from_pretrained(self.MOE_MODEL_ID)
+        cfg.num_experts = cfg.num_local_experts
+        del cfg.num_local_experts
+        del cfg.decoder_sparse_step
+        result = compute_flops_per_token(cfg, 16384)
+
+        # Equivalent to the original config with every layer forced to be an MoE layer.
+        reference = AutoConfig.from_pretrained(self.MOE_MODEL_ID)
+        reference.decoder_sparse_step = 1
+        assert result == compute_flops_per_token(reference, 16384)
+
 
 class TestGetPeakFlops:
     @pytest.mark.parametrize(

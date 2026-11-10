@@ -1816,15 +1816,18 @@ def compute_flops_per_token(config: PretrainedConfig, seq_len: int) -> int:
         mlp_flops = 2 * 3 * h * config.intermediate_size
         total_layer_flops = L * (attn_flops + mlp_flops)
     else:
-        # Routed experts (gate + up + down, 3 matmuls each) + router.
-        if Version(transformers.__version__) >= Version("5.1.0"):
-            num_experts = config.num_local_experts
-        else:
+        # Routed experts (gate + up + down, 3 matmuls each) + router. The total expert count lives on
+        # `num_local_experts` for most MoE configs (Mixtral, Qwen3-MoE) but on `num_experts` for others
+        # (Qwen3.5-MoE, Beam), independently of the transformers version, so accept either name.
+        num_experts = getattr(config, "num_local_experts", None)
+        if num_experts is None:
             num_experts = config.num_experts
         moe_mlp_flops = num_experts_per_tok * 2 * 3 * h * config.moe_intermediate_size
         moe_mlp_flops += 2 * h * num_experts
         dense_mlp_flops = 2 * 3 * h * config.intermediate_size  # interspersed dense layers
-        sparse_step = config.decoder_sparse_step
+        # `decoder_sparse_step` controls how often a layer is a MoE layer; configs that omit it make
+        # every layer an MoE layer, i.e. a step of 1.
+        sparse_step = getattr(config, "decoder_sparse_step", 1)
         total_layer_flops = sum(
             attn_flops + (moe_mlp_flops if layer_idx % sparse_step == 0 else dense_mlp_flops) for layer_idx in range(L)
         )
